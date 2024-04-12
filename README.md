@@ -18,4 +18,4 @@ handsome快速申请友链插件
 > 原作者：[二C](https://blog.ccdalao.cn/archives/197/)
 
 ## 效果图
-![效果图](https://eu-2.404888.xyz/dcBI51D.png)
+![效果图](https://github.com/OuOumm/ErcerLink/assets/43441064/c2581a2c-7a30-42fa-a667-5382a0001c60)
