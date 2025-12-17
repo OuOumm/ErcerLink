@@ -1,21 +1,73 @@
 # ErcerLink
 handsome快速申请友链插件
 
-## 使用教程：
+## 功能特性
+- 🚀 快速申请友链功能
+- 🔒 Cloudflare Turnstile 验证码支持
+- 📧 邮件通知功能（需安装 CommentToMail 插件）
+- 📱 响应式设计
+- ⚡ PJAX 支持
+- 🎨 简洁美观的表单样式
 
-默认使用本地文件，如需使用CDN加速，请填写完整路径，例如：
+## 安装方法
+1. 下载插件，解压后将文件夹重命名为 `ErcerLink`
+2. 上传到 Typecho 插件目录 `usr/plugins/`
+3. 在 Typecho 后台启用插件
 
-```https://jsd.onmicrosoft.cn/gh/OuOumm/omo/data/js/ErcerLinks.js```
+## 配置说明
 
-使用方法，在友联页面添加以下内容：
+### 基础设置
+- **使用说明**：插件使用指南
 
-```<div id="postLink"></div>```
+### 资源加载
+- **CDN加速地址**：默认使用本地JS文件，如需CDN加速，请填写完整URL
 
-如果使用pjax，请在回调函数内增加以下代码：
+### 安全设置
+- **Turnstile Site Key**：Cloudflare Turnstile 前端站点密钥
+- **Turnstile Secret Key**：Cloudflare Turnstile 后端验证密钥
 
-```pjax_Link();```
+### 通知设置
+- **邮件通知**：开启后，当有新链接提交时，将通过 CommentToMail 插件发送邮件通知
+  - 提示：需安装并启用 [CommentToMail](https://github.com/ououmm/CommentToMail) 插件才能使用此功能
 
-> 原作者：[二C](https://blog.ccdalao.cn/archives/197/)
+## 使用教程
+
+### 1. 添加友链申请区域
+在友链页面添加以下代码：
+```html
+<div id="postLink"></div>
+```
+
+### 2. PJAX 支持
+如使用 pjax，请在回调函数内添加以下代码：
+```javascript
+pjax_Link();
+```
+
+### 3. 验证码配置
+1. 前往 [Cloudflare Dashboard](https://dash.cloudflare.com/) 获取 Turnstile 密钥
+2. 在插件配置中填写 `Turnstile Site Key` 和 `Turnstile Secret Key`
+3. 保存配置后，验证码将自动启用
+
+## 依赖说明
+- **jQuery**：用于DOM操作和AJAX请求
+- **CommentToMail**（可选）：用于发送邮件通知
+- **Cloudflare Turnstile**（可选）：用于验证码验证
 
 ## 效果图
 ![效果图](https://github.com/OuOumm/ErcerLink/assets/43441064/c2581a2c-7a30-42fa-a667-5382a0001c60)
+
+## 更新日志
+
+### v1.2.0
+- 🔧 修复了验证码渲染时的类型错误
+- 📧 添加了邮件通知功能
+- ✨ 优化了验证码交互体验
+- 🎨 精简化了代码结构
+- 📖 更新了README文档
+
+## 原作者
+[二C](https://blog.ccdalao.cn/archives/197/)
+
+## 许可证
+GNU General Public License v3.0

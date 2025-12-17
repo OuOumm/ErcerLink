@@ -42,7 +42,7 @@ class ErcerLink_Plugin implements Typecho_Plugin_Interface {
         $enableEmailNotify = new Typecho_Widget_Helper_Form_Element_Select('enableEmailNotify', 
             array('0' => _t('关闭'), '1' => _t('开启')), '0', _t('邮件通知'), 
             '<p>开启后，当有新链接提交时，将通过CommentToMail插件发送邮件通知。</p>
-            <p><strong>提示：</strong>需安装并启用 <a href="https://github.com/typecho-fans/plugins/tree/master/CommentToMail" target="_blank">CommentToMail</a> 插件才能使用此功能。</p>');
+            <p><strong>提示：</strong>需安装并启用 <a href="https://github.com/ououmm/CommentToMail" target="_blank">CommentToMail</a> 插件才能使用此功能。</p>');
         
         // 添加自定义验证规则，检测CommentToMail插件是否已启用
         $enableEmailNotify->addRule(function($value) {
