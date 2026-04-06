@@ -81,15 +81,23 @@ class ErcerLink_Plugin implements Typecho_Plugin_Interface {
     }
     
     public static function footer() {
-        $pluginOptions = Typecho_Widget::widget('Widget_Options')->plugin('ErcerLink');
-        $path = htmlspecialchars($pluginOptions->path);
-        $path = empty($path)?Helper::options()->pluginUrl . '/ErcerLink/js/ErcerLinks.js':$path;
+        // 使用静态变量缓存配置，避免重复查询数据库
+        static $pluginOptions = null;
+        if ($pluginOptions === null) {
+            $pluginOptions = Typecho_Widget::widget('Widget_Options')->plugin('ErcerLink');
+        }
         
-        // 添加Turnstile Site Key全局变量
+        $path = htmlspecialchars($pluginOptions->path, ENT_QUOTES, 'UTF-8');
+        $path = empty($path) ? Helper::options()->pluginUrl . '/ErcerLink/js/ErcerLinks.js' : $path;
+        
+        // 添加 Turnstile Site Key 全局变量，使用 htmlspecialchars 防止 XSS
         if (!empty($pluginOptions->turnstileSiteKey)) {
-            echo '<script >window.ercerLinkTurnstileSiteKey = "' . $pluginOptions->turnstileSiteKey . '";</script>';
+            $siteKey = htmlspecialchars($pluginOptions->turnstileSiteKey, ENT_QUOTES, 'UTF-8');
+            echo '<script>window.ercerLinkTurnstileSiteKey = "' . $siteKey . '";</script>';
+            // 使用 defer 延迟加载，不阻塞页面渲染
             echo '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>';
         }
-        echo '<script src="' . $path . '"></script>';
+        // JS 文件使用 defer 属性，确保 DOM 加载完成后执行
+        echo '<script src="' . $path . '" defer></script>';
     }
 }
