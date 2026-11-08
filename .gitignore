@@ -1,4 +1,3 @@
-```
 # Compiled and build artifacts
 *.pyc
 __pycache__/
@@ -34,8 +33,6 @@ target/
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
 # System files
 .DS_Store
@@ -49,4 +46,11 @@ htmlcov/
 # Cache directories
 .mypy_cache/
 .pytest_cache/
-```
+
+# Test artifacts
+tests/.dump.json
+
+# Tooling workspaces
+.agents/
+.codex/
+.trellis/

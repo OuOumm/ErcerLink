@@ -5,99 +5,281 @@
 *
 * @package ErcerLink
 * @author 歆宋
-* @version 1.2.0
+* @version 1.4.0
 * @link https://blog.warhut.cn
 */
-class ErcerLink_Plugin implements Typecho_Plugin_Interface {
-    /* 插件配置方法 */
-    public static function config(Typecho_Widget_Helper_Form $form) {
-        // 配置分组：基础设置
-        $form->addInput(new Typecho_Widget_Helper_Form_Element_Textarea('usage', NULL, '', _t('使用说明'), 
-            '<div style="background: #f0f8ff; padding: 15px; border-radius: 8px; border-left: 4px solid #1890ff;">
-                <h4 style="margin: 0 0 10px 0; color: #1890ff;">💡 使用指南</h4>
-                <ol style="margin: 0; padding-left: 20px;">
-                    <li><strong>添加友链申请区域：</strong>在友链页面添加 <code>&lt;div id="postLink"&gt;&lt;/div&gt;</code></li>
-                    <li><strong>Pjax支持：</strong>如使用pjax，请在回调函数内添加 <code>pjax_Link();</code></li>
-                    <li><strong>验证码配置：</strong>填写Cloudflare Turnstile信息以启用安全防护，默认为空不启用。</li>
-                </ol>
-            </div>'));
-        
-        // 隐藏说明性输入框
-        $usage = $form->getInput('usage');
-        $usage->input->setAttribute('style', 'display: none;');
-        
-        // 配置分组：资源加载
-        $form->addInput(new Typecho_Widget_Helper_Form_Element_Text('path', NULL, '', _t('CDN加速地址'), 
-            '<p>默认使用本地JS文件，如需CDN加速，请填写完整URL：</p>
-            <code>https://cdn.example.com/ErcerLinks.js</code>'));
-        
-        // 配置分组：安全设置
-        $form->addInput(new Typecho_Widget_Helper_Form_Element_Text('turnstileSiteKey', NULL, '', _t('Turnstile Site Key'), 
-            '<p>前端验证码显示所需，获取地址：<a href="https://dash.cloudflare.com/" target="_blank">Cloudflare Dashboard</a></p>'));
-        
-        $form->addInput(new Typecho_Widget_Helper_Form_Element_Password('turnstileSecretKey', NULL, '', _t('Turnstile Secret Key'), 
-            '<p>后端验证码验证所需，请勿泄露！</p>'));
-        
-        // 配置分组：通知设置
-        $enableEmailNotify = new Typecho_Widget_Helper_Form_Element_Select('enableEmailNotify', 
-            array('0' => _t('关闭'), '1' => _t('开启')), '0', _t('邮件通知'), 
-            '<p>开启后，当有新链接提交时，将通过CommentToMail插件发送邮件通知。</p>
-            <p><strong>提示：</strong>需安装并启用 <a href="https://github.com/ououmm/CommentToMail" target="_blank">CommentToMail</a> 插件才能使用此功能。</p>');
-        
-        // 添加自定义验证规则，检测CommentToMail插件是否已启用
-        $enableEmailNotify->addRule(function($value) {
-            if ($value == '1') {
-                // 1. 获取所有已启用的插件列表（Typecho内置方法）
-                $activatedPlugins = Typecho_Plugin::export();
-                // 2. 检测插件是否在启用列表中（插件标识需完全匹配）
-                if (!isset($activatedPlugins['CommentToMail'])) {
-                    return _t('请先安装并启用 CommentToMail 插件！');
-                }
-            }
-            return true;
-        }, _t('插件依赖错误'));
-        
-        $form->addInput($enableEmailNotify);
-    }
-    
-    /* 个人用户的配置方法 */
-    public static function personalConfig(Typecho_Widget_Helper_Form $form) {}
-    
-    /* CDN路径验证 */
-    public static function validateCdnPath($path) {
-        return empty($path) || filter_var($path, FILTER_VALIDATE_URL) !== false;
-    }
-    
-    /* 插件实现方法 */
-    public static function render() {}
-    
-    public static function activate() {
-        Helper::addRoute("route_to_link_add", "/link_add", "ErcerLink_Action", 'link_add');
+require_once dirname(__FILE__) . '/Util.php';
+require_once dirname(__FILE__) . '/Action.php';
+
+class ErcerLink_Plugin implements Typecho_Plugin_Interface
+{
+    const ROUTE_NAME = 'route_to_link_add';
+    const ROUTE_PATH = '/link_add';
+    const ROUTE_ACTION = 'link_add';
+    const LOCAL_SCRIPT_PATH = '/js/ErcerLinks.js';
+    const TURNSTILE_API_URL = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+    const CONFIG_VAR = 'ercerLinkConfig';
+
+    /**
+     * 启用插件
+     */
+    public static function activate()
+    {
+        Helper::addRoute(self::ROUTE_NAME, self::ROUTE_PATH, 'ErcerLink_Action', self::ROUTE_ACTION);
         Typecho_Plugin::factory('Widget_Archive')->footer = array('ErcerLink_Plugin', 'footer');
     }
-    
-    public static function deactivate() {
-        Helper::removeRoute("route_to_link_add");
+
+    /**
+     * 停用插件
+     */
+    public static function deactivate()
+    {
+        Helper::removeRoute(self::ROUTE_NAME);
     }
-    
-    public static function footer() {
-        // 使用静态变量缓存配置，避免重复查询数据库
-        static $pluginOptions = null;
-        if ($pluginOptions === null) {
-            $pluginOptions = Typecho_Widget::widget('Widget_Options')->plugin('ErcerLink');
+
+    /**
+     * 插件配置
+     *
+     * @param Typecho_Widget_Helper_Form $form
+     */
+    public static function config(Typecho_Widget_Helper_Form $form)
+    {
+        $usage = new Typecho_Widget_Helper_Form_Element_Textarea(
+            'usage',
+            null,
+            '',
+            _t('使用说明'),
+            self::usageDescription()
+        );
+        $form->addInput($usage);
+        $usage->input->setAttribute('style', 'display: none;');
+
+        $path = new Typecho_Widget_Helper_Form_Element_Text(
+            'path',
+            null,
+            '',
+            _t('CDN加速地址'),
+            '<p>留空使用插件自带脚本；如需 CDN 加速，请填写以 <code>.js</code> 结尾的 HTTP(S) 地址。</p>'
+            . '<code>https://cdn.example.com/ErcerLinks.js</code>'
+        );
+        $path->addRule(array('ErcerLink_Util', 'isValidScriptUrl'), _t('请输入以 .js 结尾的有效 HTTP(S) 地址'));
+        $form->addInput($path);
+
+        $form->addInput(new Typecho_Widget_Helper_Form_Element_Text(
+            'turnstileSiteKey',
+            null,
+            '',
+            _t('Turnstile Site Key'),
+            '<p>前端验证码显示所需。填写后自动启用验证码，留空则关闭。</p>'
+            . '<p>获取地址：<a href="https://dash.cloudflare.com/" target="_blank">Cloudflare Dashboard</a></p>'
+        ));
+
+        $form->addInput(new Typecho_Widget_Helper_Form_Element_Password(
+            'turnstileSecretKey',
+            null,
+            '',
+            _t('Turnstile Secret Key'),
+            '<p>后端验证所需，请勿泄露。</p>'
+        ));
+
+        $form->addInput(new Typecho_Widget_Helper_Form_Element_Select(
+            'proxyHeader',
+            array(
+                'NONE'            => _t('不信任任何转发头（默认）'),
+                'CF-CONNECTING-IP' => _t('Cloudflare'),
+                'X-FORWARDED-FOR' => _t('X-Forwarded-For'),
+                'X-REAL-IP'       => _t('X-Real-IP')
+            ),
+            'NONE',
+            _t('客户端 IP 来源'),
+            '<p>站点未接入 CDN / 反向代理时请保持默认，否则限流可能被伪造请求头绕过。</p>'
+        ));
+
+        $form->addInput(self::emailNotifyInput());
+    }
+
+    /**
+     * 个人配置（无）
+     *
+     * @param Typecho_Widget_Helper_Form $form
+     */
+    public static function personalConfig(Typecho_Widget_Helper_Form $form)
+    {
+    }
+
+    /**
+     * 输出前端资源
+     */
+    public static function footer()
+    {
+        $options = ErcerLink_Util::options();
+        $siteKey = trim(ErcerLink_Util::toStr($options->turnstileSiteKey));
+
+        self::configScript(self::buildFrontConfig($siteKey));
+
+        if ($siteKey !== '') {
+            // Turnstile 的 onload 回调可能早于本插件脚本执行，先在内联脚本里
+            // 建立回调占位，等 ErcerLink 就绪后再转交，避免回调丢失。
+            echo '<script>window.ercerLinkTurnstileFired=false;'
+                . 'window.ercerLinkTurnstileReady=function(){'
+                . 'window.ercerLinkTurnstileFired=true;'
+                . 'if(window.ErcerLink&&typeof window.ErcerLink.onTurnstileReady==="function"){'
+                . 'window.ErcerLink.onTurnstileReady();'
+                . '}};</script>';
+            self::scriptTag(self::TURNSTILE_API_URL . '?render=explicit&onload=ercerLinkTurnstileReady', 'async defer');
         }
-        
-        $path = htmlspecialchars($pluginOptions->path, ENT_QUOTES, 'UTF-8');
-        $path = empty($path) ? Helper::options()->pluginUrl . '/ErcerLink/js/ErcerLinks.js' : $path;
-        
-        // 添加 Turnstile Site Key 全局变量，使用 htmlspecialchars 防止 XSS
-        if (!empty($pluginOptions->turnstileSiteKey)) {
-            $siteKey = htmlspecialchars($pluginOptions->turnstileSiteKey, ENT_QUOTES, 'UTF-8');
-            echo '<script>window.ercerLinkTurnstileSiteKey = "' . $siteKey . '";</script>';
-            // 使用 defer 延迟加载，不阻塞页面渲染
-            echo '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>';
+
+        self::scriptTag(self::scriptUrl($options), 'defer');
+    }
+
+    /**
+     * 组装前端配置
+     *
+     * @param string $siteKey
+     * @return array
+     */
+    private static function buildFrontConfig($siteKey)
+    {
+        $index = ErcerLink_Util::toStr(Helper::options()->index);
+
+        return array(
+            'endpoint'   => rtrim($index, '/') . self::ROUTE_PATH,
+            'csrf'       => ErcerLink_Util::csrfToken(),
+            'csrfField'  => ErcerLink_Util::CSRF_FIELD,
+            'csrfHeader' => ErcerLink_Util::CSRF_HEADER_NAME,
+            'siteKey'    => $siteKey,
+            'success'    => ErcerLink_Action::SUCCESS_RESPONSE,
+            'messages'   => self::frontMessages()
+        );
+    }
+
+    /**
+     * 前端文案
+     *
+     * @return array
+     */
+    private static function frontMessages()
+    {
+        return array(
+            'captchaTitle'    => _t('请完成验证'),
+            'captchaMessage'  => _t('请先完成人机验证'),
+            'requestFail'     => _t('请求失败，请稍后重试'),
+            'successTitle'    => _t('提交成功'),
+            'successMessage'  => _t('等待站长审核哟！'),
+            'failTitle'       => _t('提交失败'),
+            'submitting'      => _t('提交中...')
+        );
+    }
+
+    /**
+     * 输出配置脚本
+     *
+     * @param array $config
+     */
+    private static function configScript(array $config)
+    {
+        $json = json_encode(
+            $config,
+            JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE
+        );
+
+        if ($json === false) {
+            return;
         }
-        // JS 文件使用 defer 属性，确保 DOM 加载完成后执行
-        echo '<script src="' . $path . '" defer></script>';
+
+        echo '<script>window.' . self::CONFIG_VAR . '=' . $json . ';</script>';
+    }
+
+    /**
+     * 输出 script 标签
+     *
+     * @param string $src
+     * @param string $attributes
+     */
+    private static function scriptTag($src, $attributes = '')
+    {
+        $src = htmlspecialchars($src, ENT_QUOTES, 'UTF-8');
+        $attributes = trim($attributes);
+
+        echo '<script src="' . $src . '"' . ($attributes === '' ? '' : ' ' . $attributes) . '></script>';
+    }
+
+    /**
+     * 解析前端脚本地址
+     *
+     * @param object $options
+     * @return string
+     */
+    private static function scriptUrl($options)
+    {
+        $path = trim(ErcerLink_Util::toStr($options->path));
+
+        if ($path !== '' && ErcerLink_Util::isValidScriptUrl($path)) {
+            return $path;
+        }
+
+        $pluginUrl = ErcerLink_Util::toStr(Helper::options()->pluginUrl);
+
+        return rtrim($pluginUrl, '/') . '/ErcerLink' . self::LOCAL_SCRIPT_PATH;
+    }
+
+    /**
+     * 邮件通知配置项
+     *
+     * @return Typecho_Widget_Helper_Form_Element_Select
+     */
+    private static function emailNotifyInput()
+    {
+        $element = new Typecho_Widget_Helper_Form_Element_Select(
+            'enableEmailNotify',
+            array('0' => _t('关闭'), '1' => _t('开启')),
+            '0',
+            _t('邮件通知'),
+            '<p>开启后，新友链提交会写入 CommentToMail 的邮件队列。</p>'
+            . '<p><strong>提示：</strong>需安装并启用 '
+            . '<a href="https://github.com/ououmm/CommentToMail" target="_blank">CommentToMail</a> 插件。</p>'
+        );
+
+        $element->addRule(array('ErcerLink_Plugin', 'validateEmailNotify'), _t('插件依赖错误'));
+
+        return $element;
+    }
+
+    /**
+     * 校验邮件通知依赖
+     *
+     * @param mixed $value
+     * @return bool|string
+     */
+    public static function validateEmailNotify($value)
+    {
+        if (ErcerLink_Util::toStr($value) !== '1') {
+            return true;
+        }
+
+        $plugins = Typecho_Plugin::export();
+
+        if (isset($plugins['activated']['CommentToMail'])) {
+            return true;
+        }
+
+        return _t('请先安装并启用 CommentToMail 插件');
+    }
+
+    /**
+     * 使用说明
+     *
+     * @return string
+     */
+    private static function usageDescription()
+    {
+        return '<div style="background:#f0f8ff;padding:15px;border-radius:8px;border-left:4px solid #1890ff;">'
+            . '<h4 style="margin:0 0 10px;color:#1890ff;">💡 使用指南</h4>'
+            . '<ol style="margin:0;padding-left:20px;">'
+            . '<li><strong>添加友链申请区域：</strong>在友链页面添加 <code>&lt;div id="postLink"&gt;&lt;/div&gt;</code></li>'
+            . '<li><strong>Pjax 支持：</strong>在回调函数内调用 <code>pjax_Link();</code></li>'
+            . '<li><strong>验证码：</strong>填写 Cloudflare Turnstile 密钥后自动启用。</li>'
+            . '<li><strong>依赖：</strong>前端脚本为原生 JS，不依赖 jQuery。</li>'
+            . '</ol></div>';
     }
 }
