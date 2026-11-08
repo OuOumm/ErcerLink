@@ -5,10 +5,11 @@
 *
 * @package ErcerLink
 * @author 歆宋
-* @version 1.4.0
+* @version 1.5.0
 * @link https://blog.warhut.cn
 */
 require_once dirname(__FILE__) . '/Util.php';
+require_once dirname(__FILE__) . '/Mailer.php';
 require_once dirname(__FILE__) . '/Action.php';
 
 class ErcerLink_Plugin implements Typecho_Plugin_Interface
@@ -235,9 +236,10 @@ class ErcerLink_Plugin implements Typecho_Plugin_Interface
             array('0' => _t('关闭'), '1' => _t('开启')),
             '0',
             _t('邮件通知'),
-            '<p>开启后，新友链提交会写入 CommentToMail 的邮件队列。</p>'
+            '<p>开启后，新友链提交会通过 CommentToMail 直接发信通知站长。</p>'
             . '<p><strong>提示：</strong>需安装并启用 '
-            . '<a href="https://github.com/ououmm/CommentToMail" target="_blank">CommentToMail</a> 插件。</p>'
+            . '<a href="https://github.com/ououmm/CommentToMail" target="_blank">CommentToMail</a> '
+            . '6.0 及以上版本，SMTP 与异步设置在该插件中配置。</p>'
         );
 
         $element->addRule(array('ErcerLink_Plugin', 'validateEmailNotify'), _t('插件依赖错误'));
@@ -257,13 +259,17 @@ class ErcerLink_Plugin implements Typecho_Plugin_Interface
             return true;
         }
 
-        $plugins = Typecho_Plugin::export();
-
-        if (isset($plugins['activated']['CommentToMail'])) {
-            return true;
+        try {
+            $plugins = Typecho_Plugin::export();
+        } catch (Throwable $e) {
+            return _t('请先安装并启用 CommentToMail 插件');
         }
 
-        return _t('请先安装并启用 CommentToMail 插件');
+        if (!isset($plugins['activated'][ErcerLink_Mailer::PLUGIN_NAME])) {
+            return _t('请先安装并启用 CommentToMail 插件');
+        }
+
+        return ErcerLink_Mailer::available() ? true : _t('CommentToMail 版本过低，请升级到 6.0 及以上');
     }
 
     /**

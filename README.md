@@ -1,6 +1,6 @@
 # ErcerLink
 
-handsome 快速申请友链插件（v1.4.0 安全重写版）
+handsome 快速申请友链插件（v1.5.0）
 
 ## 功能特性
 
@@ -8,7 +8,7 @@ handsome 快速申请友链插件（v1.4.0 安全重写版）
 - 🔒 多层提交防护：同源校验 + 双提交 Cookie CSRF + 频率限制
 - 🛡️ 严格输入规范化：链接仅允许 HTTP(S)，文本剔除全部标签与引号类字符
 - 🔐 Cloudflare Turnstile 验证码（可选，校验 action）
-- 📧 邮件通知（可选，依赖 CommentToMail 插件）
+- 📧 邮件通知（可选，经 CommentToMail 6.0+ 直发）
 - ⚡ PJAX 支持，`pjax_Link()` 可重复调用
 - 🧩 零 jQuery 依赖，纯原生 JS
 - 📱 响应式表单，跟随站点暗色主题
@@ -27,7 +27,8 @@ handsome 快速申请友链插件（v1.4.0 安全重写版）
 | 文件 | 职责 |
 | --- | --- |
 | `Plugin.php` | 插件生命周期、后台配置表单、前端脚本注入 |
-| `Action.php` | `/link_add` 路由处理：校验 → 写库 → 邮件入队 |
+| `Action.php` | `/link_add` 路由处理：校验 → 写库 → 触发通知 |
+| `Mailer.php` | 邮件通知：调用 CommentToMail 直发、正文渲染 |
 | `Util.php` | 公共工具：CSRF、同源、限流、清洗、URL 规范化、客户端 IP |
 | `js/ErcerLinks.js` | 前端表单渲染与提交，原生 JS |
 | `tests/` | CLI 验证脚本，不参与运行时 |
@@ -50,8 +51,10 @@ handsome 快速申请友链插件（v1.4.0 安全重写版）
 
 ### 通知设置
 
-- **邮件通知**：开启后，新链接提交时通过 CommentToMail 插件入队发信
-  - 提示：需安装并启用 [CommentToMail](https://github.com/ououmm/CommentToMail) 插件；未安装时开启该项会被配置校验拦下
+- **邮件通知**：开启后，新友链提交会立即通知站长
+  - 要求：[CommentToMail](https://github.com/ououmm/CommentToMail) **6.0 及以上**并已启用，否则开启该项会被配置校验拦下
+  - 发信方式：调用 `CommentToMail_Plugin::pushMail()`，SMTP 参数与异步策略全部沿用该插件的设置，本插件不重复保存一份
+  - 邮件正文由本插件自行渲染（内联样式），不复用评论模板，避免出现「文章：」「回复了您的评论」等评论语义
 
 ## 使用教程
 
@@ -84,7 +87,7 @@ pjax_Link();
 ## 依赖说明
 
 - **jQuery**：不需要（v1.4.0 起已移除依赖；若主题提供 `$.message` 则复用它弹出提示）
-- **CommentToMail**（可选）：用于发送邮件通知
+- **CommentToMail 6.0+**（可选）：用于发送邮件通知，低版本会被配置校验拦下
 - **Cloudflare Turnstile**（可选）：用于验证码验证
 - **PHP 5.6+**、Typecho 1.1+
 
@@ -93,6 +96,19 @@ pjax_Link();
 ![效果图](https://github.com/OuOumm/ErcerLink/assets/43441064/c2581a2c-7a30-42fa-a667-5382a0001c60)
 
 ## 更新日志
+
+### v1.5.0（适配 CommentToMail 6.0）
+
+**背景**：CommentToMail 6.0 取消了数据库邮件队列表，改为 SMTP 直发并只保留 `fastcgi_finish_request` 异步。原实现写 `typecho_mail` 表在新版下会因表不存在而静默失败，开启通知也收不到邮件。
+
+- **直发通道**：新增 `Mailer.php`，调用 `CommentToMail_Plugin::pushMail()`，SMTP 与异步策略全部沿用 CommentToMail 自身的配置
+- **版本门禁**：`ErcerLink_Mailer::available()` 要求 CommentToMail 已启用且提供 `pushMail()`；不满足时配置表单直接拦下，运行期静默跳过，不再尝试写新版已删除的 `typecho_mail` 表
+- **CommentToMail 侧新增 `pushMail()`**：`sendOne()` 要求调用方自带 `smtp` 数组，而该数组原本只在私有 `context()` 内组装，外部插件取不到；新增公开入口后，SMTP 读取逻辑仍只有一份，不会出现两个插件各存一份配置而漂移
+- **抽出 `smtpOf()`**：`context()` 与 `pushMail()` 共用同一份 SMTP 组装逻辑
+- **正文自渲染**：邮件正文由本插件生成（内联样式、600px 卡片），不复用评论模板，避免「文章：」「回复了您的评论」等评论语义错位
+- **头字段注入防护**：邮件主题去标签、去 CRLF、折叠空白并限长 120 字符
+- **新增 `ErcerLink_Util::flushOptions()`**：配置缓存改为类静态属性，可在运行时丢弃，便于测试与后台保存后重新读取
+- **测试**：新增 `tests/mail_check.php`（29 项），`action_check.php` 增加 `notify_push` / `notify_push_skipped` 两个通道场景
 
 ### v1.4.0（安全重写）
 
@@ -147,8 +163,9 @@ pjax_Link();
 
 ```bash
 php tests/runtime_check.php   # 工具层：URL 规范化、清洗、CSRF、同源、限流、IP（47 项）
-php tests/action_check.php    # 接口层：23 个提交场景的响应
-php tests/plugin_check.php    # 输出层：路由注册、footer 注入、配置校验（35 项）
+php tests/action_check.php    # 接口层：25 个提交场景的响应
+php tests/plugin_check.php    # 输出层：路由注册、footer 注入、配置校验（36 项）
+php tests/mail_check.php      # 通知层：通道可用性 / 直发内容 / 转义 / 头注入（29 项）
 ```
 
 ## 原作者

@@ -290,7 +290,24 @@ check('关闭时不校验依赖', ErcerLink_Plugin::validateEmailNotify('0'), tr
 check('开启但未装 CommentToMail 时拒绝', ErcerLink_Plugin::validateEmailNotify('1'), '请先安装并启用 CommentToMail 插件');
 
 Typecho_Plugin::$activated = array('CommentToMail' => 'CommentToMail_Plugin');
-check('开启且已装时通过', ErcerLink_Plugin::validateEmailNotify('1'), true);
+check(
+    '已装但版本过低时拒绝',
+    ErcerLink_Plugin::validateEmailNotify('1'),
+    'CommentToMail 版本过低，请升级到 6.0 及以上'
+);
+
+/* 条件声明的类在执行到此处时才注册，用来模拟 6.0 的直发入口 */
+if (!class_exists('CommentToMail_Plugin', false)) {
+    class CommentToMail_Plugin
+    {
+        public static function pushMail($mail)
+        {
+            return true;
+        }
+    }
+}
+
+check('开启且版本满足时通过', ErcerLink_Plugin::validateEmailNotify('1'), true);
 
 echo "\n";
 

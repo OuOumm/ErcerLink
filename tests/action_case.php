@@ -31,9 +31,17 @@ abstract class Typecho_Widget
     }
 }
 
+$scenario = isset($argv[1]) ? $argv[1] : '';
+
 $pluginDir = dirname(__DIR__);
 require_once $pluginDir . '/Util.php';
+require_once $pluginDir . '/Mailer.php';
 require_once $pluginDir . '/Action.php';
+
+/* CommentToMail 6.0 直发通道的桩：只在相关场景声明。 */
+if (in_array($scenario, array('notify_push', 'notify_push_skipped'), true)) {
+    require_once __DIR__ . '/commenttomail_stub.php';
+}
 
 /* ---------------- 桩 ---------------- */
 
@@ -86,7 +94,6 @@ class Typecho_Db
 {
     public static $existingUrl = null;
     public static $inserted = null;
-    public static $mailRows = array();
     public static $selectCalls = 0;
 
     public static function get()
@@ -129,10 +136,6 @@ class Typecho_Db
         if ($query->table === 'table.links') {
             self::$inserted = $query->rows;
             return 99;
-        }
-
-        if ($query->table === 'typecho_mail') {
-            self::$mailRows[] = $query->rows;
         }
 
         return 1;
@@ -180,8 +183,6 @@ class StubAction extends ErcerLink_Action
 }
 
 /* ---------------- 场景准备 ---------------- */
-
-$scenario = isset($argv[1]) ? $argv[1] : '';
 
 $pluginOptions = new stdClass();
 $pluginOptions->turnstileSecretKey = '';
@@ -290,6 +291,19 @@ switch ($scenario) {
         Typecho_Plugin::$activated = array('CommentToMail' => 'CommentToMail_Plugin');
         break;
 
+    case 'notify_push':
+        // CommentToMail 6.0：存在 pushMail()，走直发通道
+        $pluginOptions->enableEmailNotify = '1';
+        Typecho_Plugin::$activated = array('CommentToMail' => 'CommentToMail_Plugin');
+        break;
+
+    case 'notify_push_skipped':
+        // 直发被 CommentToMail 跳过（如 SMTP 未配置）：友链仍应入库成功
+        $pluginOptions->enableEmailNotify = '1';
+        Typecho_Plugin::$activated = array('CommentToMail' => 'CommentToMail_Plugin');
+        CommentToMail_Plugin::$result = false;
+        break;
+
     case 'turnstile_secret_without_token':
         $pluginOptions->turnstileSecretKey = 'stub-secret';
         break;
@@ -351,7 +365,8 @@ if (getenv('ERCERLINK_DUMP') === '1') {
     register_shutdown_function(function () {
         $payload = array(
             'inserted' => Typecho_Db::$inserted,
-            'mailRows' => Typecho_Db::$mailRows
+            'pushed'   => class_exists('CommentToMail_Plugin', false)
+                ? CommentToMail_Plugin::$pushed : array()
         );
 
         file_put_contents(

@@ -3,7 +3,7 @@
  * ErcerLink Action 类
  *
  * 处理前端友链表单：同源 + CSRF 校验、限流、Turnstile 验证、输入规范化、
- * 写库与 CommentToMail 邮件入队。
+ * 写库与邮件通知（邮件细节见 Mailer.php）。
  *
  * @package ErcerLink
  */
@@ -11,8 +11,6 @@ class ErcerLink_Action extends Typecho_Widget implements Widget_Interface_Do
 {
     /** 成功响应体，前端据此判定提交成功 */
     const SUCCESS_RESPONSE = '200';
-    /** 邮件通知开关的开启值 */
-    const EMAIL_NOTIFY_ENABLED = '1';
     /** 新友链默认分组 */
     const DEFAULT_LINK_SORT = 'others';
     /** Turnstile 前端字段名 */
@@ -21,8 +19,6 @@ class ErcerLink_Action extends Typecho_Widget implements Widget_Interface_Do
     const TURNSTILE_ACTION = 'link_add';
     const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
     const MAX_TURNSTILE_TOKEN_LENGTH = 2048;
-    /** CommentToMail 队列中「待发送」状态 */
-    const MAIL_QUEUE_PENDING = '0';
 
     /**
      * 路由入口
@@ -69,7 +65,7 @@ class ErcerLink_Action extends Typecho_Widget implements Widget_Interface_Do
 
             $insertId = (int) $db->query($db->insert('table.links')->rows($data));
 
-            $this->queueEmailNotification($data, $insertId, $ip);
+            ErcerLink_Mailer::notify($data, $insertId, $ip);
 
             $this->success();
         } catch (Throwable $e) {
@@ -345,94 +341,5 @@ class ErcerLink_Action extends Typecho_Widget implements Widget_Interface_Do
         $body = @file_get_contents($url, false, $context);
 
         return is_string($body) ? $body : '';
-    }
-
-    /**
-     * 是否启用邮件通知（开关开启且 CommentToMail 处于激活状态）
-     *
-     * @return bool
-     */
-    private function shouldNotify()
-    {
-        if (ErcerLink_Util::opt('enableEmailNotify') !== self::EMAIL_NOTIFY_ENABLED) {
-            return false;
-        }
-
-        if (!class_exists('Typecho_Plugin')) {
-            return false;
-        }
-
-        try {
-            $export = Typecho_Plugin::export();
-        } catch (Throwable $e) {
-            return false;
-        }
-
-        return isset($export['activated']['CommentToMail']);
-    }
-
-    /**
-     * 写入 CommentToMail 邮件队列
-     *
-     * 邮件通知属于附属功能，任何异常都不得影响友链写入结果。
-     *
-     * @param array $data
-     * @param int $insertId
-     * @param string $ip
-     */
-    private function queueEmailNotification(array $data, $insertId, $ip)
-    {
-        if (!$this->shouldNotify()) {
-            return;
-        }
-
-        try {
-            $options = Typecho_Widget::widget('Widget_Options');
-            $siteUrl = rtrim(ErcerLink_Util::toStr($options->siteUrl), '/');
-
-            $author = htmlspecialchars($data['name'], ENT_QUOTES, 'UTF-8');
-            $url = htmlspecialchars($data['url'], ENT_QUOTES, 'UTF-8');
-            $description = htmlspecialchars($data['description'], ENT_QUOTES, 'UTF-8');
-            $image = htmlspecialchars($data['image'], ENT_QUOTES, 'UTF-8');
-
-            $mailContent = array(
-                'siteTitle' => ErcerLink_Util::toStr($options->title),
-                'timezone'  => ErcerLink_Util::toStr($options->timezone),
-                'cid'       => $insertId,
-                'coid'      => $insertId,
-                'created'   => time(),
-                'author'    => $data['name'],
-                'authorId'  => 0,
-                'ownerId'   => 1,
-                'mail'      => '',
-                'ip'        => $ip,
-                'title'     => '收到新的友链申请',
-                'text'      => '站点名称：' . $author . '<br>站点地址：' . $url
-                    . '<br>图标地址：' . $image . '<br>站点描述：' . $description,
-                'permalink' => $url,
-                'status'    => 'approved',
-                'parent'    => 0,
-                'manage'    => $siteUrl . '/' . trim(__TYPECHO_ADMIN_DIR__, '/') . '/manage-links.php',
-                'banMail'   => 0
-            );
-
-            $encoded = json_encode($mailContent, JSON_UNESCAPED_UNICODE);
-
-            if ($encoded === false) {
-                return;
-            }
-
-            $db = Typecho_Db::get();
-            $db->query(
-                $db->insert($db->getPrefix() . 'mail')->rows(array(
-                    'content' => base64_encode($encoded),
-                    'sent'    => self::MAIL_QUEUE_PENDING
-                ))
-            );
-        } catch (Throwable $e) {
-            if (function_exists('error_log')) {
-                error_log('ErcerLink 邮件通知入队失败: ' . $e->getMessage());
-            }
-        }
     }
 }

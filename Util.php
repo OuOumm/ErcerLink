@@ -27,6 +27,9 @@ class ErcerLink_Util
     /** 限流文件最长保留时间（秒） */
     const RATE_LIMIT_FILE_TTL = 86400;
 
+    /** 插件配置对象缓存 */
+    private static $options = null;
+
     /**
      * 插件配置对象（进程内缓存，永不返回 null）
      *
@@ -34,25 +37,34 @@ class ErcerLink_Util
      */
     public static function options()
     {
-        static $options = null;
-
-        if ($options !== null) {
-            return $options;
+        if (self::$options !== null) {
+            return self::$options;
         }
 
-        $options = new stdClass();
+        self::$options = new stdClass();
 
         try {
             $plugin = Typecho_Widget::widget('Widget_Options')->plugin('ErcerLink');
 
             if (is_object($plugin)) {
-                $options = $plugin;
+                self::$options = $plugin;
             }
         } catch (Throwable $e) {
-            $options = new stdClass();
+            self::$options = new stdClass();
         }
 
-        return $options;
+        return self::$options;
+    }
+
+    /**
+     * 丢弃配置缓存
+     *
+     * 配置对象在进程内只读一次，避免每次取配置都走一遍 Widget 解析。后台
+     * 保存设置、或测试中替换配置对象后需要重新读取时调用本方法。
+     */
+    public static function flushOptions()
+    {
+        self::$options = null;
     }
 
     /**
